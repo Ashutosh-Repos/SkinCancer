@@ -1,6 +1,6 @@
 """
 Model architecture definitions.
-Contains Sequential CNN and Custom ResNet implementations.
+Contains Sequential CNN, Custom ResNet, and Transfer Learning implementations.
 """
 
 import numpy as np
@@ -15,6 +15,7 @@ from config import (
     MODEL_CONFIG,
     CLR_CONFIG,
     SGD_CONFIG,
+    TRANSFER_LEARNING_MODELS,
     get_image_shape
 )
 
@@ -304,25 +305,144 @@ def build_resnet_model() -> Model:
     return model
 
 
+# ============================================================
+# TRANSFER LEARNING MODELS
+# ============================================================
+
+def build_transfer_model(model_type: str) -> Model:
+    """
+    Build a transfer learning model using a pretrained backbone.
+    
+    Supports: EfficientNetB0, ResNet50, DenseNet121.
+    All use ImageNet pretrained weights with a custom classification head.
+    
+    Args:
+        model_type: One of 'efficientnet', 'resnet50', 'densenet'
+    
+    Returns:
+        Keras model (uncompiled)
+    """
+    from tensorflow.keras.applications import (
+        EfficientNetB0, ResNet50, DenseNet121
+    )
+    
+    BACKBONES = {
+        'efficientnet': EfficientNetB0,
+        'resnet50':     ResNet50,
+        'densenet':     DenseNet121,
+    }
+    
+    if model_type not in BACKBONES:
+        raise ValueError(f"Unsupported transfer model: {model_type}")
+    
+    config = MODEL_CONFIG[model_type]
+    input_shape = (*config['image_size'], 3)
+    num_classes = DATASET_CONFIG['num_classes']
+    
+    print(f"Loading {model_type} backbone with ImageNet weights...")
+    
+    # Load pretrained backbone (without classification head)
+    BackboneClass = BACKBONES[model_type]
+    base_model = BackboneClass(
+        weights='imagenet',
+        include_top=False,
+        input_shape=input_shape
+    )
+    
+    # Freeze the base model for Stage 1 training
+    base_model.trainable = False
+    
+    # Build custom classification head
+    inputs = layers.Input(shape=input_shape)
+    x = base_model(inputs, training=False)
+    x = layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
+    x = layers.BatchNormalization(name='head_bn')(x)
+    x = layers.Dense(config['dense_units'], activation='relu', name='head_dense')(x)
+    x = layers.Dropout(config['dropout_rate'], name='head_dropout')(x)
+    outputs = layers.Dense(num_classes, activation='softmax', name='predictions')(x)
+    
+    model = Model(inputs, outputs, name=config['name'])
+    
+    print(f"  Base model layers: {len(base_model.layers)}")
+    print(f"  Trainable params: {sum(p.numpy().size for p in model.trainable_weights):,}")
+    print(f"  Non-trainable params: {sum(p.numpy().size for p in model.non_trainable_weights):,}")
+    
+    return model
+
+
+def build_vit_model() -> Model:
+    """
+    Build a Vision Transformer model using TensorFlow Hub.
+    
+    Uses a pretrained ViT-B/16 feature extractor from TF Hub.
+    Input images should be in [0, 1] range.
+    
+    Returns:
+        Keras model (uncompiled)
+    """
+    import tensorflow_hub as hub
+    
+    config = MODEL_CONFIG['vit']
+    input_shape = (*config['image_size'], 3)
+    num_classes = DATASET_CONFIG['num_classes']
+    
+    print("Loading Vision Transformer from TensorFlow Hub...")
+    
+    # ViT-B/16 feature extractor (pretrained on ImageNet-21k)
+    vit_url = "https://tfhub.dev/google/imagenet/vit_base_patch16_224/feature_vector/1"
+    
+    inputs = layers.Input(shape=input_shape)
+    
+    # ViT feature extractor (outputs 768-dim vector)
+    hub_layer = hub.KerasLayer(
+        vit_url, 
+        trainable=True,
+        name='vit_base'
+    )
+    x = hub_layer(inputs)
+    
+    # Classification head
+    x = layers.BatchNormalization(name='head_bn')(x)
+    x = layers.Dense(config['dense_units'], activation='relu', name='head_dense')(x)
+    x = layers.Dropout(config['dropout_rate'], name='head_dropout')(x)
+    outputs = layers.Dense(num_classes, activation='softmax', name='predictions')(x)
+    
+    model = Model(inputs, outputs, name='vit_model')
+    
+    print(f"  ViT model loaded successfully")
+    print(f"  Total params: {model.count_params():,}")
+    
+    return model
+
+
+# ============================================================
+# MODEL FACTORY
+# ============================================================
+
 def compile_model(model: Model, model_type: str = 'sequential') -> Model:
     """
     Compile model with appropriate optimizer and loss.
     
     Args:
         model: Keras model to compile
-        model_type: Type of model ('sequential' or 'resnet')
+        model_type: Type of model
         
     Returns:
         Compiled model
     """
     if model_type == 'sequential':
         optimizer = Adam(learning_rate=0.001)
-    else:  # resnet
+    elif model_type == 'resnet':
         optimizer = SGD(
             learning_rate=SGD_CONFIG['learning_rate'],
             momentum=SGD_CONFIG['momentum'],
             nesterov=SGD_CONFIG['nesterov']
         )
+    elif model_type in TRANSFER_LEARNING_MODELS:
+        lr = MODEL_CONFIG[model_type]['base_learning_rate']
+        optimizer = Adam(learning_rate=lr)
+    else:
+        optimizer = Adam(learning_rate=0.001)
     
     model.compile(
         optimizer=optimizer,
@@ -338,7 +458,8 @@ def get_model(model_type: str = 'sequential') -> Model:
     Get a compiled model of specified type.
     
     Args:
-        model_type: Type of model ('sequential' or 'resnet')
+        model_type: Type of model ('sequential', 'resnet', 'efficientnet',
+                     'resnet50', 'densenet', 'vit')
         
     Returns:
         Compiled Keras model
@@ -347,6 +468,10 @@ def get_model(model_type: str = 'sequential') -> Model:
         model = build_sequential_model()
     elif model_type == 'resnet':
         model = build_resnet_model()
+    elif model_type in ('efficientnet', 'resnet50', 'densenet'):
+        model = build_transfer_model(model_type)
+    elif model_type == 'vit':
+        model = build_vit_model()
     else:
         raise ValueError(f"Unknown model type: {model_type}")
     
@@ -356,4 +481,3 @@ def get_model(model_type: str = 'sequential') -> Model:
     print(f"Total parameters: {model.count_params():,}")
     
     return model
-

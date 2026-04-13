@@ -1,9 +1,11 @@
 """
 Inference module for skin cancer detection.
 Provides prediction functionality for single images and batch processing.
+Auto-detects model type and preprocessing from saved metadata.
 """
 
 import os
+import json
 import argparse
 import numpy as np
 from PIL import Image
@@ -23,6 +25,7 @@ class SkinCancerPredictor:
     def __init__(self, model_path: str):
         """
         Initialize predictor with trained model.
+        Auto-detects image size and normalization from model metadata.
         
         Args:
             model_path: Path to saved model file
@@ -32,9 +35,58 @@ class SkinCancerPredictor:
         
         print(f"Loading model from {model_path}...")
         self.model = load_model(model_path)
-        self.image_size = DATASET_CONFIG['image_size']
+        
+        # Auto-detect settings from metadata
+        self._load_settings(model_path)
         
         print("Model loaded successfully!")
+        print(f"  Image size: {self.image_size}")
+        print(f"  Normalization: {self.normalize_mode}")
+    
+    def _load_settings(self, model_path: str):
+        """Load model settings from metadata or auto-detect."""
+        # Try loading metadata JSON
+        metadata_path = model_path.replace('.h5', '_metadata.json')
+        
+        if os.path.exists(metadata_path):
+            with open(metadata_path) as f:
+                metadata = json.load(f)
+            self.image_size = tuple(metadata.get('image_size', [90, 120]))
+            self.normalize_mode = metadata.get('normalize', True)
+            self.model_type = metadata.get('model_type', 'unknown')
+        else:
+            # Auto-detect from model input shape
+            input_shape = self.model.input_shape
+            if isinstance(input_shape, list):
+                input_shape = input_shape[0]
+            
+            h, w = input_shape[1], input_shape[2]
+            if h is not None and w is not None:
+                self.image_size = (h, w)
+                self.normalize_mode = False if (h == 224 and w == 224) else True
+            else:
+                self.image_size = DATASET_CONFIG['image_size']
+                self.normalize_mode = True
+            
+            self.model_type = 'unknown'
+        
+        # Load normalization stats if using custom normalization
+        self.train_mean = None
+        self.train_std = None
+        
+        if self.normalize_mode is True:
+            stats_path = os.path.join('data', 'norm_stats.json')
+            if os.path.exists(stats_path):
+                with open(stats_path) as f:
+                    stats = json.load(f)
+                self.train_mean = stats['mean']
+                self.train_std = stats['std']
+                print(f"  Loaded norm stats: mean={self.train_mean:.2f}, std={self.train_std:.2f}")
+            else:
+                # Fallback to approximate values
+                self.train_mean = 160.0
+                self.train_std = 46.7
+                print(f"  Using fallback norm stats (no norm_stats.json found)")
     
     def preprocess_image(self, image: np.ndarray) -> np.ndarray:
         """
@@ -56,11 +108,16 @@ class SkinCancerPredictor:
         img = img.resize((self.image_size[1], self.image_size[0]))  # (width, height)
         
         # Convert to array
-        img_array = np.array(img)
+        img_array = np.array(img, dtype=np.float32)
         
-        # Normalize (using approximate training statistics)
-        # In production, these should be saved during training
-        img_array = (img_array - 160.0) / 46.7
+        # Apply normalization based on model type
+        if self.normalize_mode is True:
+            # Custom mean/std normalization (Sequential/ResNet)
+            img_array = (img_array - self.train_mean) / self.train_std
+        elif self.normalize_mode == 'rescale':
+            # Scale to [0, 1] (ViT)
+            img_array = img_array / 255.0
+        # else: False → keep [0, 255] (EfficientNet, ResNet50, DenseNet)
         
         # Add batch dimension
         img_array = np.expand_dims(img_array, axis=0)
@@ -251,4 +308,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

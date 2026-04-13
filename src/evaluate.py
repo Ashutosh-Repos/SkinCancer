@@ -1,6 +1,7 @@
 """
 Model evaluation and testing module.
 Provides comprehensive evaluation metrics and visualizations.
+Auto-detects model type and preprocessing from saved metadata.
 """
 
 import os
@@ -24,7 +25,7 @@ from sklearn.metrics import (
 )
 from tensorflow.keras.models import load_model
 
-from config import INDEX_TO_CLASS, LESION_CLASSES, PATHS, ensure_directories
+from config import INDEX_TO_CLASS, LESION_CLASSES, PATHS, TRANSFER_LEARNING_MODELS, ensure_directories
 from data_loader import load_dataset
 
 
@@ -34,6 +35,7 @@ class ModelEvaluator:
     def __init__(self, model_path: str):
         """
         Initialize evaluator with trained model.
+        Auto-detects image size and normalization from model metadata.
         
         Args:
             model_path: Path to saved model file
@@ -44,6 +46,9 @@ class ModelEvaluator:
         self.model = load_model(model_path)
         self.model_name = os.path.splitext(os.path.basename(model_path))[0]
         
+        # Auto-detect settings from metadata
+        self._load_metadata(model_path)
+        
         # Create results directory
         self.results_dir = os.path.join(PATHS['results_dir'], self.model_name)
         os.makedirs(self.results_dir, exist_ok=True)
@@ -52,12 +57,48 @@ class ModelEvaluator:
                            for i in range(len(INDEX_TO_CLASS))]
         
         print(f"Model loaded successfully!")
+        print(f"  Image size: {self.image_size}")
+        print(f"  Normalization: {self.normalize}")
         print(f"Results will be saved to: {self.results_dir}")
     
+    def _load_metadata(self, model_path: str):
+        """Load model metadata for auto-configuration."""
+        # Try loading metadata JSON
+        metadata_path = model_path.replace('.h5', '_metadata.json')
+        
+        if os.path.exists(metadata_path):
+            with open(metadata_path) as f:
+                metadata = json.load(f)
+            self.image_size = tuple(metadata.get('image_size', [90, 120]))
+            self.normalize = metadata.get('normalize', True)
+            self.model_type = metadata.get('model_type', 'unknown')
+            print(f"  Loaded metadata from {metadata_path}")
+        else:
+            # Fallback: detect from model input shape
+            input_shape = self.model.input_shape
+            if isinstance(input_shape, list):
+                input_shape = input_shape[0]
+            
+            h, w = input_shape[1], input_shape[2]
+            
+            if h is not None and w is not None:
+                self.image_size = (h, w)
+                # If 224x224, likely a transfer learning model
+                self.normalize = False if (h == 224 and w == 224) else True
+            else:
+                self.image_size = (90, 120)
+                self.normalize = True
+            
+            self.model_type = 'unknown'
+            print(f"  No metadata found, auto-detected settings")
+    
     def load_test_data(self):
-        """Load test dataset."""
+        """Load test dataset with correct preprocessing."""
         print("\nLoading test data...")
-        _, _, _, _, self.X_test, self.y_test, _ = load_dataset()
+        _, _, _, _, self.X_test, self.y_test, _ = load_dataset(
+            image_size=self.image_size,
+            normalize=self.normalize
+        )
         print(f"Test samples: {len(self.X_test)}")
     
     def predict(self):
@@ -74,18 +115,18 @@ class ModelEvaluator:
         
         metrics = {
             'accuracy': float(accuracy_score(self.y_true, self.y_pred)),
-            'precision_macro': float(precision_score(self.y_true, self.y_pred, average='macro')),
-            'precision_weighted': float(precision_score(self.y_true, self.y_pred, average='weighted')),
-            'recall_macro': float(recall_score(self.y_true, self.y_pred, average='macro')),
-            'recall_weighted': float(recall_score(self.y_true, self.y_pred, average='weighted')),
-            'f1_macro': float(f1_score(self.y_true, self.y_pred, average='macro')),
-            'f1_weighted': float(f1_score(self.y_true, self.y_pred, average='weighted')),
+            'precision_macro': float(precision_score(self.y_true, self.y_pred, average='macro', zero_division=0)),
+            'precision_weighted': float(precision_score(self.y_true, self.y_pred, average='weighted', zero_division=0)),
+            'recall_macro': float(recall_score(self.y_true, self.y_pred, average='macro', zero_division=0)),
+            'recall_weighted': float(recall_score(self.y_true, self.y_pred, average='weighted', zero_division=0)),
+            'f1_macro': float(f1_score(self.y_true, self.y_pred, average='macro', zero_division=0)),
+            'f1_weighted': float(f1_score(self.y_true, self.y_pred, average='weighted', zero_division=0)),
         }
         
         # Per-class metrics
-        precision_per_class = precision_score(self.y_true, self.y_pred, average=None)
-        recall_per_class = recall_score(self.y_true, self.y_pred, average=None)
-        f1_per_class = f1_score(self.y_true, self.y_pred, average=None)
+        precision_per_class = precision_score(self.y_true, self.y_pred, average=None, zero_division=0)
+        recall_per_class = recall_score(self.y_true, self.y_pred, average=None, zero_division=0)
+        f1_per_class = f1_score(self.y_true, self.y_pred, average=None, zero_division=0)
         
         metrics['per_class'] = {}
         for i, class_name in enumerate(self.class_names):
@@ -131,7 +172,8 @@ class ModelEvaluator:
             self.y_true, 
             self.y_pred, 
             target_names=self.class_names,
-            digits=4
+            digits=4,
+            zero_division=0
         )
         
         report_path = os.path.join(self.results_dir, 'classification_report.txt')
@@ -261,4 +303,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

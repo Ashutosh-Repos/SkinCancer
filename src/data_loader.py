@@ -4,11 +4,14 @@ Handles dataset loading, preprocessing, and data augmentation.
 """
 
 import os
+import gc
+import json
 import numpy as np
 import pandas as pd
 from PIL import Image
 from typing import Tuple, Optional
 from sklearn.model_selection import train_test_split
+from sklearn.utils.class_weight import compute_class_weight
 from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 
@@ -23,17 +26,19 @@ from config import (
 class DataLoader:
     """Handles loading and preprocessing of skin lesion dataset."""
     
-    def __init__(self, metadata_path: str, images_dir: str):
+    def __init__(self, metadata_path: str, images_dir: str, image_size: tuple = None):
         """
         Initialize the data loader.
         
         Args:
             metadata_path: Path to the metadata CSV file
             images_dir: Directory containing the images
+            image_size: Optional override for image size (height, width).
+                        If None, uses DATASET_CONFIG default.
         """
         self.metadata_path = metadata_path
         self.images_dir = images_dir
-        self.image_size = DATASET_CONFIG['image_size']
+        self.image_size = image_size or DATASET_CONFIG['image_size']
         self.num_classes = DATASET_CONFIG['num_classes']
         
         self.metadata_df = None
@@ -75,9 +80,9 @@ class DataLoader:
     
     def load_images(self) -> None:
         """Load and preprocess all images."""
-        print("Loading images...")
+        print(f"Loading images (resizing to {self.image_size[1]}x{self.image_size[0]})...")
         images = []
-        for path in self.metadata_df['path']:
+        for i, path in enumerate(self.metadata_df['path']):
             try:
                 img = Image.open(path).resize(
                     (self.image_size[1], self.image_size[0])  # (width, height)
@@ -87,13 +92,22 @@ class DataLoader:
                 print(f"Error loading image {path}: {e}")
                 # Add a blank image as placeholder
                 images.append(np.zeros((*self.image_size, 3), dtype=np.uint8))
+            
+            if (i + 1) % 2000 == 0:
+                print(f"  Loaded {i + 1}/{len(self.metadata_df)} images...")
         
         self.metadata_df['image'] = images
         print(f"Loaded {len(images)} images")
     
-    def prepare_data(self) -> Tuple:
+    def prepare_data(self, normalize: object = True) -> Tuple:
         """
         Prepare train, validation, and test datasets.
+        
+        Args:
+            normalize: Controls image normalization.
+                - True: Custom mean/std normalization (for Sequential/ResNet)
+                - False: Keep raw [0, 255] pixels (for EfficientNet, ResNet50, DenseNet)
+                - 'rescale': Scale to [0, 1] range (for ViT)
         
         Returns:
             Tuple of (X_train, y_train, X_val, y_val, X_test, y_test)
@@ -106,9 +120,15 @@ class DataLoader:
         
         print("Preparing datasets...")
         
-        # Extract features and targets
-        X = np.array(self.metadata_df['image'].tolist())
+        # Extract features and targets — FORCE float32 to save memory
+        X = np.array(self.metadata_df['image'].tolist(), dtype=np.float32)
         y = self.metadata_df['cell_type_idx'].values
+        
+        # Free the DataFrame images to reclaim memory
+        if 'image' in self.metadata_df.columns:
+            self.metadata_df = self.metadata_df.drop(columns=['image'])
+            gc.collect()
+            print("  Freed DataFrame image memory")
         
         # Split into train+val and test
         test_split = TRAINING_CONFIG['test_split']
@@ -119,6 +139,10 @@ class DataLoader:
             stratify=y
         )
         
+        # Free the full X array (no longer needed after split)
+        del X
+        gc.collect()
+        
         # Split train into train and validation
         val_split = TRAINING_CONFIG['validation_split']
         X_train, X_val, y_train, y_val = train_test_split(
@@ -128,13 +152,37 @@ class DataLoader:
             stratify=y_train_val
         )
         
-        # Normalize images
-        train_mean = X_train.mean()
-        train_std = X_train.std()
+        # Free train_val arrays
+        del X_train_val, y_train_val
+        gc.collect()
         
-        X_train = (X_train - train_mean) / train_std
-        X_val = (X_val - train_mean) / train_std
-        X_test = (X_test - train_mean) / train_std
+        # Apply normalization based on mode
+        if normalize is True:
+            # Custom mean/std normalization (for from-scratch models)
+            train_mean = X_train.mean()
+            train_std = X_train.std()
+            
+            X_train = (X_train - train_mean) / train_std
+            X_val = (X_val - train_mean) / train_std
+            X_test = (X_test - train_mean) / train_std
+            
+            self.train_mean = train_mean
+            self.train_std = train_std
+            
+            # Save normalization stats for inference
+            self._save_norm_stats(train_mean, train_std)
+            print(f"  Normalized with mean={train_mean:.2f}, std={train_std:.2f}")
+            
+        elif normalize == 'rescale':
+            # Scale to [0, 1] range (for ViT)
+            X_train = X_train / 255.0
+            X_val = X_val / 255.0
+            X_test = X_test / 255.0
+            print("  Rescaled to [0, 1] range (ViT)")
+            
+        else:
+            # Keep raw [0, 255] pixels (for EfficientNet, ResNet50, DenseNet)
+            print("  No normalization applied (model handles preprocessing)")
         
         # Convert labels to categorical
         y_train = to_categorical(y_train, num_classes=self.num_classes)
@@ -145,11 +193,20 @@ class DataLoader:
         print(f"Validation samples: {len(X_val)}")
         print(f"Test samples: {len(X_test)}")
         
-        # Store normalization parameters
-        self.train_mean = train_mean
-        self.train_std = train_std
-        
         return X_train, y_train, X_val, y_val, X_test, y_test
+    
+    def _save_norm_stats(self, mean: float, std: float):
+        """Save normalization statistics for inference."""
+        stats = {'mean': float(mean), 'std': float(std)}
+        stats_path = os.path.join(
+            os.path.dirname(self.metadata_path), 'norm_stats.json'
+        )
+        try:
+            with open(stats_path, 'w') as f:
+                json.dump(stats, f, indent=2)
+            print(f"  Normalization stats saved to {stats_path}")
+        except Exception as e:
+            print(f"  Warning: Could not save norm stats: {e}")
     
     def get_data_generator(self) -> ImageDataGenerator:
         """
@@ -159,6 +216,31 @@ class DataLoader:
             Configured ImageDataGenerator
         """
         return ImageDataGenerator(**AUGMENTATION_CONFIG)
+    
+    def get_class_weights(self, y_train_categorical: np.ndarray) -> dict:
+        """
+        Compute balanced class weights to handle class imbalance.
+        
+        Args:
+            y_train_categorical: One-hot encoded training labels
+            
+        Returns:
+            Dictionary mapping class index to weight
+        """
+        y_integers = np.argmax(y_train_categorical, axis=1)
+        class_weights = compute_class_weight(
+            class_weight='balanced',
+            classes=np.unique(y_integers),
+            y=y_integers
+        )
+        weights_dict = dict(enumerate(class_weights))
+        print("\nClass weights computed:")
+        from config import INDEX_TO_CLASS, LESION_CLASSES
+        for idx, weight in weights_dict.items():
+            class_code = INDEX_TO_CLASS[idx]
+            class_name = LESION_CLASSES[class_code]
+            print(f"  {class_name}: {weight:.3f}")
+        return weights_dict
     
     def preprocess_image(self, image: np.ndarray) -> np.ndarray:
         """
@@ -173,7 +255,7 @@ class DataLoader:
         # Resize image
         img = Image.fromarray(image)
         img = img.resize((self.image_size[1], self.image_size[0]))
-        img_array = np.array(img)
+        img_array = np.array(img, dtype=np.float32)
         
         # Normalize using training statistics
         if hasattr(self, 'train_mean') and hasattr(self, 'train_std'):
@@ -191,20 +273,26 @@ class DataLoader:
         return self.metadata_df['dx'].value_counts()
 
 
-def load_dataset() -> Tuple:
+def load_dataset(image_size: tuple = None, normalize: object = True) -> Tuple:
     """
     Convenience function to load the complete dataset.
+    
+    Args:
+        image_size: Optional override for image size (height, width)
+        normalize: Normalization mode (True, False, or 'rescale')
     
     Returns:
         Tuple of (X_train, y_train, X_val, y_val, X_test, y_test, data_loader)
     """
     data_loader = DataLoader(
         metadata_path=DATASET_CONFIG['metadata_file'],
-        images_dir=DATASET_CONFIG['images_dir']
+        images_dir=DATASET_CONFIG['images_dir'],
+        image_size=image_size
     )
     
     data_loader.load_metadata()
-    X_train, y_train, X_val, y_val, X_test, y_test = data_loader.prepare_data()
+    X_train, y_train, X_val, y_val, X_test, y_test = data_loader.prepare_data(
+        normalize=normalize
+    )
     
     return X_train, y_train, X_val, y_val, X_test, y_test, data_loader
-

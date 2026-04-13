@@ -51,11 +51,11 @@ TRAINING_CONFIG = {
     'batch_size': 64,
     'epochs': 30,
     'validation_split': 0.15,
-    'test_split': 0.01,
+    'test_split': 0.10,
     'learning_rate': 0.001,
     'early_stopping_patience': 5,
     'reduce_lr_patience': 4,
-    'reduce_lr_factor': 0.0001,
+    'reduce_lr_factor': 0.1,
     'min_lr': 0.000001,
 }
 
@@ -83,8 +83,59 @@ MODEL_CONFIG = {
         'dropout_rate': None,
         'blocks': 4,
         'layers_per_block': 2,
-    }
+    },
+    'efficientnet': {
+        'name': 'efficientnet_model',
+        'image_size': (224, 224),
+        'dropout_rate': 0.5,
+        'dense_units': 256,
+        'normalize': False,
+        'base_learning_rate': 0.001,
+        'fine_tune_learning_rate': 0.00001,
+        'fine_tune_at_layer': 100,
+        'stage1_epochs': 10,
+        'stage2_epochs': 20,
+    },
+    'resnet50': {
+        'name': 'resnet50_model',
+        'image_size': (224, 224),
+        'dropout_rate': 0.5,
+        'dense_units': 256,
+        'normalize': False,
+        'base_learning_rate': 0.001,
+        'fine_tune_learning_rate': 0.00001,
+        'fine_tune_at_layer': 140,
+        'stage1_epochs': 10,
+        'stage2_epochs': 20,
+    },
+    'densenet': {
+        'name': 'densenet121_model',
+        'image_size': (224, 224),
+        'dropout_rate': 0.5,
+        'dense_units': 256,
+        'normalize': False,
+        'base_learning_rate': 0.001,
+        'fine_tune_learning_rate': 0.00001,
+        'fine_tune_at_layer': 300,
+        'stage1_epochs': 10,
+        'stage2_epochs': 20,
+    },
+    'vit': {
+        'name': 'vit_model',
+        'image_size': (224, 224),
+        'dropout_rate': 0.5,
+        'dense_units': 256,
+        'normalize': 'rescale',
+        'base_learning_rate': 0.001,
+        'fine_tune_learning_rate': 0.00001,
+        'fine_tune_at_layer': 0,
+        'stage1_epochs': 10,
+        'stage2_epochs': 20,
+    },
 }
+
+# Transfer learning model types
+TRANSFER_LEARNING_MODELS = ['efficientnet', 'resnet50', 'densenet', 'vit']
 
 # CLR configuration for ResNet
 CLR_CONFIG = {
@@ -96,7 +147,7 @@ CLR_CONFIG = {
 
 # SGD configuration for ResNet
 SGD_CONFIG = {
-    'learning_rate': 0.1,
+    'learning_rate': 0.001,
     'momentum': 0.9,
     'nesterov': True,
 }
