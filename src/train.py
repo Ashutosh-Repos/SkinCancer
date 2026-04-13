@@ -483,6 +483,18 @@ class ModelTrainer:
         self.load_data()
         self.build_model()
         self.train(epochs, batch_size)
+        
+        # Reload the best checkpoint so evaluate() uses the true best model
+        # (EarlyStopping may have restored a Stage 2 best that is worse
+        #  than an earlier checkpoint saved by ModelCheckpoint)
+        best_checkpoint = os.path.join(
+            PATHS['checkpoints_dir'], f'{self.model_type}_best.h5'
+        )
+        if os.path.exists(best_checkpoint):
+            from tensorflow.keras.models import load_model
+            print(f"\nReloading best checkpoint from {best_checkpoint}")
+            self.model = load_model(best_checkpoint)
+        
         self.evaluate()
         self.plot_history()
         self.save_final_model()

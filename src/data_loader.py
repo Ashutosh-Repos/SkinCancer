@@ -19,6 +19,7 @@ from config import (
     DATASET_CONFIG, 
     LESION_CLASSES, 
     CLASS_TO_INDEX,
+    INDEX_TO_CLASS,
     TRAINING_CONFIG,
     AUGMENTATION_CONFIG
 )
@@ -43,9 +44,6 @@ class DataLoader:
         self.num_classes = DATASET_CONFIG['num_classes']
         
         self.metadata_df = None
-        self.train_data = None
-        self.val_data = None
-        self.test_data = None
         
     def load_metadata(self) -> pd.DataFrame:
         """Load and preprocess metadata."""
@@ -235,7 +233,6 @@ class DataLoader:
         )
         weights_dict = dict(enumerate(class_weights))
         print("\nClass weights computed:")
-        from config import INDEX_TO_CLASS, LESION_CLASSES
         for idx, weight in weights_dict.items():
             class_code = INDEX_TO_CLASS[idx]
             class_name = LESION_CLASSES[class_code]
@@ -296,3 +293,37 @@ def load_dataset(image_size: tuple = None, normalize: object = True) -> Tuple:
     )
     
     return X_train, y_train, X_val, y_val, X_test, y_test, data_loader
+
+
+def load_test_only(image_size: tuple = None, normalize: object = True) -> Tuple:
+    """
+    Load ONLY the test split, immediately freeing train/val from memory.
+    
+    Uses the same random_state=42 split as load_dataset(), so the test set
+    is identical. This is ~6× more memory-efficient for evaluation.
+    
+    Args:
+        image_size: Optional override for image size (height, width)
+        normalize: Normalization mode (True, False, or 'rescale')
+    
+    Returns:
+        Tuple of (X_test, y_test)
+    """
+    data_loader = DataLoader(
+        metadata_path=DATASET_CONFIG['metadata_file'],
+        images_dir=DATASET_CONFIG['images_dir'],
+        image_size=image_size
+    )
+    
+    data_loader.load_metadata()
+    X_train, y_train, X_val, y_val, X_test, y_test = data_loader.prepare_data(
+        normalize=normalize
+    )
+    
+    # Immediately free train/val to save memory
+    del X_train, y_train, X_val, y_val
+    gc.collect()
+    print(f"  Freed train/val memory (keeping {len(X_test)} test samples only)")
+    
+    return X_test, y_test
+

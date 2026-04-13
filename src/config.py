@@ -52,7 +52,6 @@ TRAINING_CONFIG = {
     'epochs': 30,
     'validation_split': 0.15,
     'test_split': 0.10,
-    'learning_rate': 0.001,
     'early_stopping_patience': 5,
     'reduce_lr_patience': 4,
     'reduce_lr_factor': 0.1,
@@ -140,7 +139,7 @@ TRANSFER_LEARNING_MODELS = ['efficientnet', 'resnet50', 'densenet', 'vit']
 # CLR configuration for ResNet
 CLR_CONFIG = {
     'base_lr': 0.001,
-    'max_lr': 0.1,
+    'max_lr': 0.01,  # 10x base_lr; 0.1 was too aggressive with SGD+momentum
     'step_size_multiplier': 2,  # Multiplied by steps_per_epoch
     'mode': 'triangular',
 }
@@ -174,7 +173,7 @@ API_CONFIG = {
     'host': '0.0.0.0',
     'port': 5000,
     'debug': False,
-    'model_path': 'models/best_model.h5',
+    'model_path': 'models/checkpoints/efficientnet_best.h5',
 }
 
 

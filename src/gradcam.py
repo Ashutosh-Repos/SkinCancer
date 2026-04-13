@@ -34,6 +34,9 @@ class GradCAM:
         # Auto-detect settings from metadata
         self._load_settings(model_path)
         
+        # Will be set by _find_last_conv_layer if model has a nested backbone
+        self._backbone_name = None
+        
         # Find the last convolutional layer for Grad-CAM
         self.last_conv_layer = self._find_last_conv_layer()
         print(f"  Last conv layer: {self.last_conv_layer}")
@@ -143,7 +146,7 @@ class GradCAM:
                 break
         
         # If not found at top level, find inside backbone
-        if target_layer is None and hasattr(self, '_backbone_name'):
+        if target_layer is None and self._backbone_name is not None:
             backbone = self.model.get_layer(self._backbone_name)
             # Build a model that extracts the backbone's intermediate output
             # by creating a new model from backbone's input to the target layer

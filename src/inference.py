@@ -296,13 +296,16 @@ def main():
     # Print results
     print_prediction(result)
     
-    # Show top K predictions
-    if args.top_k > 1:
+    # Show top K predictions (reuse existing probabilities, no re-prediction)
+    if args.top_k > 1 and 'all_probabilities' in result:
         print(f"\n\nTop {args.top_k} Predictions:")
         print("-"*60)
-        image = np.array(Image.open(args.image))
-        top_k = predictor.get_top_k_predictions(image, k=args.top_k)
-        for i, (class_name, confidence) in enumerate(top_k, 1):
+        sorted_preds = sorted(
+            result['all_probabilities'].items(),
+            key=lambda x: x[1],
+            reverse=True
+        )
+        for i, (class_name, confidence) in enumerate(sorted_preds[:args.top_k], 1):
             print(f"{i}. {class_name:40s}: {confidence*100:.2f}%")
 
 

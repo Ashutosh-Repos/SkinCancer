@@ -26,7 +26,7 @@ from sklearn.metrics import (
 from tensorflow.keras.models import load_model
 
 from config import INDEX_TO_CLASS, LESION_CLASSES, PATHS, TRANSFER_LEARNING_MODELS, ensure_directories
-from data_loader import load_dataset
+from data_loader import load_test_only
 
 
 class ModelEvaluator:
@@ -93,9 +93,9 @@ class ModelEvaluator:
             print(f"  No metadata found, auto-detected settings")
     
     def load_test_data(self):
-        """Load test dataset with correct preprocessing."""
+        """Load test dataset with correct preprocessing (memory-efficient)."""
         print("\nLoading test data...")
-        _, _, _, _, self.X_test, self.y_test, _ = load_dataset(
+        self.X_test, self.y_test = load_test_only(
             image_size=self.image_size,
             normalize=self.normalize
         )
@@ -231,21 +231,21 @@ class ModelEvaluator:
         """Plot distribution of predictions vs true labels."""
         print("\nGenerating class distribution plot...")
         
+        num_classes = len(self.class_names)
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
         
-        # True labels distribution
-        unique_true, counts_true = np.unique(self.y_true, return_counts=True)
-        ax1.bar(range(len(unique_true)), counts_true, color='skyblue', edgecolor='black')
-        ax1.set_xticks(range(len(self.class_names)))
+        # Use bincount to ensure all classes appear (even if count=0)
+        counts_true = np.bincount(self.y_true, minlength=num_classes)
+        ax1.bar(range(num_classes), counts_true, color='skyblue', edgecolor='black')
+        ax1.set_xticks(range(num_classes))
         ax1.set_xticklabels(self.class_names, rotation=45, ha='right')
         ax1.set_title('True Label Distribution', fontsize=14, fontweight='bold')
         ax1.set_ylabel('Count')
         ax1.grid(axis='y', alpha=0.3)
         
-        # Predicted labels distribution
-        unique_pred, counts_pred = np.unique(self.y_pred, return_counts=True)
-        ax2.bar(range(len(unique_pred)), counts_pred, color='lightcoral', edgecolor='black')
-        ax2.set_xticks(range(len(self.class_names)))
+        counts_pred = np.bincount(self.y_pred, minlength=num_classes)
+        ax2.bar(range(num_classes), counts_pred, color='lightcoral', edgecolor='black')
+        ax2.set_xticks(range(num_classes))
         ax2.set_xticklabels(self.class_names, rotation=45, ha='right')
         ax2.set_title('Predicted Label Distribution', fontsize=14, fontweight='bold')
         ax2.set_ylabel('Count')

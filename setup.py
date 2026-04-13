@@ -15,7 +15,7 @@ with open('requirements.txt', 'r', encoding='utf-8') as f:
 
 setup(
     name='skin-cancer-detection',
-    version='1.0.0',
+    version='2.0.0',
     author='Skin Cancer Detection Team',
     description='Production-grade deep learning system for automated skin lesion classification',
     long_description=long_description,
