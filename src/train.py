@@ -317,8 +317,7 @@ class ModelTrainer:
         print(f"STAGE 2: Fine-tuning top layers ({stage2_epochs} epochs)")
         print("="*60)
         
-        # Unfreeze the base model
-        # For ViT (via TF Hub), the hub layer is already trainable
+        # Unfreeze the base model for fine-tuning
         if self.model_type != 'vit':
             base_model = self.model.layers[1]  # The backbone layer
             base_model.trainable = True
@@ -332,7 +331,10 @@ class ModelTrainer:
             frozen = sum(1 for l in base_model.layers if not l.trainable)
             print(f"  Base model: {trainable} trainable layers, {frozen} frozen layers")
         else:
-            print(f"  ViT: All layers trainable")
+            # ViT: unfreeze the hub layer (it was frozen in Stage 1)
+            vit_layer = self.model.layers[1]  # The hub KerasLayer
+            vit_layer.trainable = True
+            print(f"  ViT: Hub layer unfrozen for fine-tuning")
         
         # Recompile with smaller learning rate
         fine_tune_lr = config['fine_tune_learning_rate']

@@ -103,7 +103,7 @@ class CyclicLR(Callback):
         self.trn_iterations += 1
         self.clr_iterations += 1
         
-        self.history.setdefault('lr', []).append(K.get_value(self.model.optimizer.learning_rate))
+        self.history.setdefault('lr', []).append(float(self.model.optimizer.learning_rate))
         self.history.setdefault('iterations', []).append(self.trn_iterations)
         
         for k, v in logs.items():
@@ -396,7 +396,7 @@ def build_vit_model() -> Model:
     # ViT feature extractor (outputs 768-dim vector)
     hub_layer = hub.KerasLayer(
         vit_url, 
-        trainable=True,
+        trainable=False,  # Frozen for Stage 1, unfrozen in Stage 2
         name='vit_base'
     )
     x = hub_layer(inputs)

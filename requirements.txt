@@ -1,5 +1,6 @@
 # Core dependencies
 tensorflow
+tensorflow-hub
 numpy
 pandas
 scikit-learn

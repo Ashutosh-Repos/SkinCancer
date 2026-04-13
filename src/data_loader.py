@@ -18,6 +18,7 @@ from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from config import (
     DATASET_CONFIG, 
     LESION_CLASSES, 
+    CLASS_TO_INDEX,
     TRAINING_CONFIG,
     AUGMENTATION_CONFIG
 )
@@ -55,11 +56,10 @@ class DataLoader:
         age_mean = self.metadata_df['age'].mean()
         self.metadata_df['age'] = self.metadata_df['age'].fillna(age_mean)
         
-        # Create cell type mapping
+        # Create cell type mapping using explicit CLASS_TO_INDEX
+        # (pd.Categorical assigns alphabetically which mismatches INDEX_TO_CLASS)
         self.metadata_df['cell_type'] = self.metadata_df['dx'].map(LESION_CLASSES)
-        self.metadata_df['cell_type_idx'] = pd.Categorical(
-            self.metadata_df['cell_type']
-        ).codes
+        self.metadata_df['cell_type_idx'] = self.metadata_df['cell_type'].map(CLASS_TO_INDEX)
         
         # Map image paths
         image_paths = self._get_image_paths()

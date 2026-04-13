@@ -73,26 +73,29 @@ class GradCAM:
     
     def _find_last_conv_layer(self) -> str:
         """Find the name of the last convolutional layer in the model."""
-        last_conv = None
+        last_conv_name = None
         
-        # Search through all layers (including nested models)
+        # For nested models (transfer learning), we need to find Conv2D layers
+        # that produce output tensors connected to the outer model's graph.
+        # We iterate through all layers of the outer model first.
         for layer in self.model.layers:
-            if hasattr(layer, 'layers'):
-                # This is a nested model (e.g., EfficientNet backbone)
-                for sublayer in layer.layers:
-                    if isinstance(sublayer, tf.keras.layers.Conv2D):
-                        last_conv = f"{layer.name}/{sublayer.name}"
-                        self._nested_model_name = layer.name
-                        self._last_conv_sublayer = sublayer.name
-            elif isinstance(layer, tf.keras.layers.Conv2D):
-                last_conv = layer.name
-                self._nested_model_name = None
-                self._last_conv_sublayer = None
+            if isinstance(layer, tf.keras.layers.Conv2D):
+                last_conv_name = layer.name
         
-        if last_conv is None:
+        # If no Conv2D found at top level, search inside nested models
+        if last_conv_name is None:
+            for layer in self.model.layers:
+                if hasattr(layer, 'layers'):
+                    # This is a nested model (e.g., EfficientNet backbone)
+                    for sublayer in layer.layers:
+                        if isinstance(sublayer, tf.keras.layers.Conv2D):
+                            last_conv_name = sublayer.name
+                            self._backbone_name = layer.name
+        
+        if last_conv_name is None:
             raise ValueError("No Conv2D layer found in model")
         
-        return last_conv
+        return last_conv_name
     
     def preprocess_image(self, image_path: str) -> tuple:
         """
@@ -130,30 +133,44 @@ class GradCAM:
         Returns:
             Heatmap as numpy array (H, W) normalized to [0, 1]
         """
-        # Build a model that maps input to (last conv output, predictions)
-        if self._nested_model_name:
-            # For transfer learning models with nested backbone
-            backbone = self.model.get_layer(self._nested_model_name)
-            conv_output = backbone.get_layer(self._last_conv_sublayer).output
-            
-            # Create gradient model
-            grad_model = tf.keras.Model(
-                inputs=self.model.input,
-                outputs=[
-                    backbone.get_layer(self._last_conv_sublayer).output
-                    if hasattr(backbone.get_layer(self._last_conv_sublayer), 'output')
-                    else self.model.output,
-                    self.model.output
-                ]
-            )
+        # Find the target conv layer output within the connected graph
+        target_layer = None
+        
+        # First try to find the layer at the top level
+        for layer in self.model.layers:
+            if layer.name == self.last_conv_layer:
+                target_layer = layer
+                break
+        
+        # If not found at top level, find inside backbone
+        if target_layer is None and hasattr(self, '_backbone_name'):
+            backbone = self.model.get_layer(self._backbone_name)
+            # Build a model that extracts the backbone's intermediate output
+            # by creating a new model from backbone's input to the target layer
+            try:
+                backbone_conv_output = backbone.get_layer(self.last_conv_layer).output
+                # Create a new backbone model that outputs the conv layer
+                intermediate_backbone = tf.keras.Model(
+                    inputs=backbone.input,
+                    outputs=backbone_conv_output
+                )
+                # Now build the grad model using the outer model's input
+                conv_output = intermediate_backbone(self.model.input)
+                grad_model = tf.keras.Model(
+                    inputs=self.model.input,
+                    outputs=[conv_output, self.model.output]
+                )
+            except Exception:
+                # Fallback: use the backbone's full output (before GAP)
+                grad_model = tf.keras.Model(
+                    inputs=self.model.input,
+                    outputs=[backbone.output, self.model.output]
+                )
         else:
-            # For simple sequential models
-            last_conv_layer = self.model.get_layer(self.last_conv_layer
-                                                    if isinstance(self.last_conv_layer, str)
-                                                    else self.last_conv_layer)
+            # Simple model (Sequential/ResNet) — straightforward
             grad_model = tf.keras.Model(
                 inputs=self.model.input,
-                outputs=[last_conv_layer.output, self.model.output]
+                outputs=[target_layer.output, self.model.output]
             )
         
         # Compute gradients
