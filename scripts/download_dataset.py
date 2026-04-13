@@ -1,12 +1,8 @@
-"""
-Helper script to download HAM10000 dataset using Kaggle API
-Note: Requires kaggle.json to be configured
-"""
-
 import os
 import sys
 import zipfile
 import argparse
+import subprocess
 
 def download_dataset(output_dir='data'):
     """
@@ -42,8 +38,14 @@ def download_dataset(output_dir='data'):
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
     
-    # Download dataset
-    os.system(f'kaggle datasets download -d kmader/skin-cancer-mnist-ham10000 -p {output_dir}')
+    # Download dataset (with error checking)
+    result = subprocess.run(
+        ['kaggle', 'datasets', 'download', '-d', 'kmader/skin-cancer-mnist-ham10000', '-p', output_dir],
+        capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        print(f"Error downloading dataset: {result.stderr}")
+        sys.exit(1)
     
     print("\nExtracting files...")
     

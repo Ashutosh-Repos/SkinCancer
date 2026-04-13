@@ -8,7 +8,6 @@ from tensorflow import keras
 from tensorflow.keras import layers, regularizers, Model, Sequential
 from tensorflow.keras.optimizers import Adam, SGD
 from tensorflow.keras.callbacks import Callback
-from tensorflow.keras import backend as K
 
 from config import (
     DATASET_CONFIG,

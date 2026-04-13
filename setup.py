@@ -2,7 +2,6 @@
 Setup script for Skin Cancer Detection System
 """
 
-import os
 from setuptools import setup, find_packages
 
 # Read README for long description

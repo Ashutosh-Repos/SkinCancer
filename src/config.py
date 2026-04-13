@@ -4,7 +4,7 @@ Contains all hyperparameters, paths, and model configurations.
 """
 
 import os
-from typing import Dict, Tuple
+from typing import Tuple
 
 # Dataset configuration
 DATASET_CONFIG = {

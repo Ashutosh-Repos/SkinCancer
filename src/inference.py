@@ -9,7 +9,7 @@ import json
 import argparse
 import numpy as np
 from PIL import Image
-from typing import Tuple, Dict
+from typing import Dict
 from tensorflow.keras.models import load_model
 
 from config import (

@@ -15,9 +15,6 @@ import seaborn as sns
 from sklearn.metrics import (
     classification_report,
     confusion_matrix,
-    roc_curve,
-    auc,
-    precision_recall_curve,
     accuracy_score,
     precision_score,
     recall_score,
@@ -25,7 +22,7 @@ from sklearn.metrics import (
 )
 from tensorflow.keras.models import load_model
 
-from config import INDEX_TO_CLASS, LESION_CLASSES, PATHS, TRANSFER_LEARNING_MODELS, ensure_directories
+from config import INDEX_TO_CLASS, LESION_CLASSES, PATHS, ensure_directories
 from data_loader import load_test_only
 
 
