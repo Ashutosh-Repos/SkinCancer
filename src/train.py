@@ -5,6 +5,7 @@ Supports from-scratch and transfer learning models with two-stage fine-tuning.
 """
 
 import os
+import gc
 import json
 import argparse
 from datetime import datetime
@@ -241,8 +242,10 @@ class ModelTrainer:
             batch_size = TRAINING_CONFIG['batch_size']
         
         # Get data augmentation generator
+        # NOTE: datagen.fit() is NOT needed — our augmentation config only uses
+        # rotation, zoom, shift, flip, which don't require dataset statistics.
+        # Calling fit() on 224×224 data wastes ~1 GB of temporary memory.
         datagen = self.data_loader.get_data_generator()
-        datagen.fit(self.X_train)
         
         # Calculate steps per epoch
         steps_per_epoch = len(self.X_train) // batch_size
@@ -482,7 +485,25 @@ class ModelTrainer:
         """
         self.load_data()
         self.build_model()
+        
+        # Free test data during training to save memory (~0.6 GB for 224×224)
+        # Will reload from disk for evaluation afterwards.
+        X_test_backup = None
+        y_test_backup = None
+        if self.model_type in TRANSFER_LEARNING_MODELS:
+            X_test_backup = self.X_test
+            y_test_backup = self.y_test
+            del self.X_test, self.y_test
+            gc.collect()
+            print("Freed test data to save memory during training")
+        
         self.train(epochs, batch_size)
+        
+        # Restore test data
+        if X_test_backup is not None:
+            self.X_test = X_test_backup
+            self.y_test = y_test_backup
+            del X_test_backup, y_test_backup
         
         # Reload the best checkpoint so evaluate() uses the true best model
         # (EarlyStopping may have restored a Stage 2 best that is worse
