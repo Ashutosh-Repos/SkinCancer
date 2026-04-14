@@ -165,8 +165,10 @@ class DataLoader:
         
         print("Preparing datasets...")
         
-        # Extract features and targets — FORCE float32 to save memory
-        X = np.array(self.metadata_df['image'].tolist(), dtype=np.float32)
+        # Extract features as uint8 first (4× less memory than float32).
+        # For 224×224 images, uint8 array = ~1.5 GB vs float32 = ~6 GB.
+        # We split as uint8, then convert each split to float32 separately.
+        X = np.array(self.metadata_df['image'].tolist(), dtype=np.uint8)
         y = self.metadata_df['cell_type_idx'].values
         
         # Free the DataFrame images to reclaim memory
@@ -175,7 +177,7 @@ class DataLoader:
             gc.collect()
             print("  Freed DataFrame image memory")
         
-        # Split into train+val and test
+        # Split into train+val and test (still uint8, low memory)
         test_split = TRAINING_CONFIG['test_split']
         X_train_val, X_test, y_train_val, y_test = train_test_split(
             X, y, 
@@ -188,7 +190,7 @@ class DataLoader:
         del X
         gc.collect()
         
-        # Split train into train and validation
+        # Split train into train and validation (still uint8)
         val_split = TRAINING_CONFIG['validation_split']
         X_train, X_val, y_train, y_val = train_test_split(
             X_train_val, y_train_val,
@@ -200,6 +202,13 @@ class DataLoader:
         # Free train_val arrays
         del X_train_val, y_train_val
         gc.collect()
+        
+        # NOW convert splits to float32 one at a time (keeps peak memory low)
+        X_train = X_train.astype(np.float32)
+        X_val = X_val.astype(np.float32)
+        X_test = X_test.astype(np.float32)
+        gc.collect()
+        print("  Converted splits to float32")
         
         # Apply normalization based on mode
         if normalize is True:
