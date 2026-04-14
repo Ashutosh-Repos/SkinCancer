@@ -18,18 +18,19 @@ def download_dataset(output_dir='data'):
         print("Install with: pip install kaggle")
         sys.exit(1)
     
-    # Check if kaggle.json exists
+    # Check for credentials: either KAGGLE_API_TOKEN env var or kaggle.json file
     kaggle_dir = os.path.expanduser('~/.kaggle')
     kaggle_json = os.path.join(kaggle_dir, 'kaggle.json')
+    has_token = os.environ.get('KAGGLE_API_TOKEN') is not None
     
-    if not os.path.exists(kaggle_json):
+    if not has_token and not os.path.exists(kaggle_json):
         print("Error: Kaggle API credentials not found.")
-        print("\nPlease follow these steps:")
-        print("1. Go to https://www.kaggle.com/account")
-        print("2. Scroll to 'API' section and click 'Create New API Token'")
-        print("3. This downloads kaggle.json")
-        print(f"4. Move it to {kaggle_dir}/")
-        print(f"5. On Unix: chmod 600 {kaggle_json}")
+        print("\nOption 1 — API Token (recommended):")
+        print("  Set environment variable: export KAGGLE_API_TOKEN=KGAT_xxx")
+        print("\nOption 2 — Legacy kaggle.json:")
+        print("  1. Go to https://www.kaggle.com/account")
+        print("  2. Create New API Token → downloads kaggle.json")
+        print(f"  3. Move it to {kaggle_dir}/")
         sys.exit(1)
     
     print("Downloading HAM10000 dataset from Kaggle...")
