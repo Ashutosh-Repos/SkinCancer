@@ -1,5 +1,7 @@
 import os
 import sys
+import glob
+import shutil
 import zipfile
 import argparse
 import subprocess
@@ -58,17 +60,35 @@ def download_dataset(output_dir='data'):
         os.remove(main_zip)
         print("  Extracted main archive")
     
-    # Extract image parts
+    # Create target images directory
     images_dir = os.path.join(output_dir, 'images')
     os.makedirs(images_dir, exist_ok=True)
     
+    # Strategy 1: Extract sub-zip files (older Kaggle format)
     for part in [1, 2]:
         part_zip = os.path.join(output_dir, f'HAM10000_images_part_{part}.zip')
         if os.path.exists(part_zip):
             with zipfile.ZipFile(part_zip, 'r') as zip_ref:
                 zip_ref.extractall(images_dir)
             os.remove(part_zip)
-            print(f"  Extracted image part {part}")
+            print(f"  Extracted image part {part} (from zip)")
+    
+    # Strategy 2: Move images from directories (newer Kaggle format)
+    for part in [1, 2]:
+        part_dir = os.path.join(output_dir, f'HAM10000_images_part_{part}')
+        if os.path.isdir(part_dir):
+            moved = 0
+            for f in os.listdir(part_dir):
+                if f.endswith('.jpg'):
+                    shutil.move(os.path.join(part_dir, f), os.path.join(images_dir, f))
+                    moved += 1
+            shutil.rmtree(part_dir, ignore_errors=True)
+            print(f"  Moved {moved} images from part {part} directory")
+    
+    # Strategy 3: Find any loose .jpg files anywhere under data/ and move to images/
+    for jpg_file in glob.glob(os.path.join(output_dir, '**', '*.jpg'), recursive=True):
+        if os.path.dirname(jpg_file) != images_dir:
+            shutil.move(jpg_file, os.path.join(images_dir, os.path.basename(jpg_file)))
     
     # Remove CSV files we don't need
     csv_files = [
@@ -83,10 +103,12 @@ def download_dataset(output_dir='data'):
         if os.path.exists(csv_path):
             os.remove(csv_path)
     
-    print("\nDataset downloaded and extracted successfully!")
-    print(f"Location: {os.path.abspath(output_dir)}")
-    print("\nYou can now start training:")
-    print("  python src/train.py --model sequential")
+    # Verify
+    jpg_count = len([f for f in os.listdir(images_dir) if f.endswith('.jpg')])
+    print(f"\nDataset ready! Found {jpg_count} images in {os.path.abspath(images_dir)}")
+    if jpg_count < 10000:
+        print(f"WARNING: Expected ~10015 images but found {jpg_count}.")
+        print("Check the data/ directory structure manually.")
 
 def main():
     parser = argparse.ArgumentParser(

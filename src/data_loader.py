@@ -63,23 +63,65 @@ class DataLoader:
         image_paths = self._get_image_paths()
         self.metadata_df['path'] = self.metadata_df['image_id'].map(image_paths.get)
         
-        print(f"Loaded {len(self.metadata_df)} samples")
+        # Validate: check how many images were found
+        found = self.metadata_df['path'].notna().sum()
+        total = len(self.metadata_df)
+        print(f"Loaded {total} samples, found {found}/{total} image files")
+        
+        if found < total * 0.5:
+            # Most images missing — show diagnostic info
+            print(f"\nERROR: Only {found}/{total} images found!")
+            print(f"  Expected images in: {self.images_dir}")
+            data_dir = os.path.dirname(self.images_dir) or '.'
+            print(f"  Contents of {data_dir}/:")
+            for item in sorted(os.listdir(data_dir)):
+                full = os.path.join(data_dir, item)
+                if os.path.isdir(full):
+                    n = len(os.listdir(full))
+                    print(f"    {item}/ ({n} files)")
+                else:
+                    print(f"    {item}")
+            raise FileNotFoundError(
+                f"Only {found}/{total} images found in {self.images_dir}. "
+                f"Re-run: python scripts/download_dataset.py"
+            )
+        
         return self.metadata_df
     
     def _get_image_paths(self) -> dict:
-        """Create a mapping of image IDs to file paths."""
+        """Create a mapping of image IDs to file paths.
+        
+        Searches the images_dir first, then falls back to searching
+        the entire parent data directory to handle different Kaggle
+        extraction layouts.
+        """
         image_paths = {}
-        for root, _, files in os.walk(self.images_dir):
-            for file in files:
-                if file.endswith('.jpg'):
-                    image_id = os.path.splitext(file)[0]
-                    image_paths[image_id] = os.path.join(root, file)
+        
+        # Primary search: images_dir (data/images/)
+        search_dirs = [self.images_dir]
+        
+        # Fallback: also search parent data directory
+        data_dir = os.path.dirname(self.images_dir)
+        if data_dir and data_dir != self.images_dir:
+            search_dirs.append(data_dir)
+        
+        for search_dir in search_dirs:
+            if not os.path.exists(search_dir):
+                continue
+            for root, _, files in os.walk(search_dir):
+                for file in files:
+                    if file.endswith('.jpg'):
+                        image_id = os.path.splitext(file)[0]
+                        if image_id not in image_paths:
+                            image_paths[image_id] = os.path.join(root, file)
+        
         return image_paths
     
     def load_images(self) -> None:
         """Load and preprocess all images."""
         print(f"Loading images (resizing to {self.image_size[1]}x{self.image_size[0]})...")
         images = []
+        errors = 0
         for i, path in enumerate(self.metadata_df['path']):
             try:
                 img = Image.open(path).resize(
@@ -87,15 +129,20 @@ class DataLoader:
                 )
                 images.append(np.array(img))
             except Exception as e:
-                print(f"Error loading image {path}: {e}")
+                errors += 1
+                if errors <= 5:  # Only print first 5 errors
+                    print(f"Error loading image {path}: {e}")
                 # Add a blank image as placeholder
                 images.append(np.zeros((*self.image_size, 3), dtype=np.uint8))
             
             if (i + 1) % 2000 == 0:
                 print(f"  Loaded {i + 1}/{len(self.metadata_df)} images...")
         
+        if errors > 5:
+            print(f"  ... and {errors - 5} more errors (total: {errors})")
+        
         self.metadata_df['image'] = images
-        print(f"Loaded {len(images)} images")
+        print(f"Loaded {len(images)} images ({errors} errors)")
     
     def prepare_data(self, normalize: object = True) -> Tuple:
         """
@@ -159,6 +206,14 @@ class DataLoader:
             # Custom mean/std normalization (for from-scratch models)
             train_mean = X_train.mean()
             train_std = X_train.std()
+            
+            # Safety: if std is ~0, images are all black/placeholders
+            if train_std < 1.0:
+                raise ValueError(
+                    f"Training data has near-zero variance (mean={train_mean:.2f}, "
+                    f"std={train_std:.2f}). This means most images are blank. "
+                    f"Check that images exist in data/images/."
+                )
             
             X_train = (X_train - train_mean) / train_std
             X_val = (X_val - train_mean) / train_std
