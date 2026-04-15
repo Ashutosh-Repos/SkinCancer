@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Skin Cancer Intelligence - Diagnostic UI</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #4f46e5;
+            --primary-glow: rgba(79, 70, 229, 0.4);
+            --bg: #0f172a;
+            --card-bg: rgba(30, 41, 59, 0.7);
+            --text-main: #f8fafc;
+            --text-dim: #94a3b8;
+            --success: #10b981;
+            --danger: #ef4444;
+            --glass-border: rgba(255, 255, 255, 0.1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Inter', sans-serif;
+        }
+
+        body {
+            background: var(--bg);
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(79, 70, 229, 0.15) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(59, 130, 246, 0.1) 0px, transparent 50%);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        header {
+            width: 100%;
+            padding: 2rem;
+            text-align: center;
+            border-bottom: 1px solid var(--glass-border);
+            backdrop-filter: blur(10px);
+            margin-bottom: 3rem;
+        }
+
+        h1 {
+            font-family: 'Outfit', sans-serif;
+            font-size: 2.5rem;
+            font-weight: 600;
+            background: linear-gradient(135deg, #fff 0%, #cbd5e1 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 0.5rem;
+        }
+
+        .subtitle {
+            font-size: 1rem;
+            color: var(--text-dim);
+            letter-spacing: 0.05em;
+        }
+
+        main {
+            width: 90%;
+            max-width: 1000px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+            padding-bottom: 4rem;
+        }
+
+        @media (max-width: 768px) {
+            main { grid-template-columns: 1fr; }
+        }
+
+        .upload-section, .result-section {
+            background: var(--card-bg);
+            border: 1px solid var(--glass-border);
+            border-radius: 24px;
+            padding: 2rem;
+            backdrop-filter: blur(12px);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+
+        .drop-zone {
+            width: 100%;
+            height: 300px;
+            border: 2px dashed #334155;
+            border-radius: 16px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .drop-zone:hover, .drop-zone.active {
+            border-color: var(--primary);
+            background: rgba(79, 70, 229, 0.05);
+            box-shadow: 0 0 20px var(--primary-glow);
+        }
+
+        #preview {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: none;
+        }
+
+        .drop-zone-content {
+            text-align: center;
+            pointer-events: none;
+        }
+
+        .upload-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+
+        .btn-predict {
+            width: 100%;
+            margin-top: 1.5rem;
+            padding: 1rem;
+            border-radius: 12px;
+            border: none;
+            background: var(--primary);
+            color: white;
+            font-weight: 600;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px var(--primary-glow);
+        }
+
+        .btn-predict:hover:not(:disabled) {
+            transform: translateY(-2px);
+            filter: brightness(1.1);
+        }
+
+        .btn-predict:disabled {
+            background: #334155;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        .result-placeholder {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-dim);
+            text-align: center;
+        }
+
+        .result-content {
+            display: none;
+        }
+
+        .prediction-main {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .class-label {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.8rem;
+            color: var(--primary);
+            margin-bottom: 0.5rem;
+        }
+
+        .confidence-badge {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--success);
+            padding: 0.4rem 1rem;
+            border-radius: 100px;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        .chart-container {
+            margin-top: 2rem;
+        }
+
+        .prob-bar-wrapper {
+            margin-bottom: 1rem;
+        }
+
+        .prob-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.85rem;
+            margin-bottom: 0.4rem;
+            color: var(--text-dim);
+        }
+
+        .prob-bar-bg {
+            width: 100%;
+            height: 8px;
+            background: #334155;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .prob-bar-fill {
+            height: 100%;
+            background: var(--primary);
+            width: 0%;
+            transition: width 1s cubic-bezier(0.17, 0.67, 0.83, 0.67);
+        }
+
+        .loading-shimmer {
+            background: linear-gradient(90deg, #1e293b 25%, #334155 50%, #1e293b 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite linear;
+        }
+
+        @keyframes shimmer {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+        }
+
+        #file-input { display: none; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Skin Intelligence</h1>
+        <p class="subtitle">ADVANCED MELANOMA DETECTION PIPELINE</p>
+    </header>
+
+    <main>
+        <section class="upload-section">
+            <h2 style="margin-bottom: 1.5rem; font-family: 'Outfit', sans-serif;">Analysis Input</h2>
+            <div class="drop-zone" id="drop-zone">
+                <div class="drop-zone-content">
+                    <div class="upload-icon">📁</div>
+                    <p><b>Drag & Drop</b> or Click to Upload</p>
+                    <p style="font-size: 0.8rem; color: var(--text-dim); margin-top: 0.5rem;">Clinical photos (JPEG/PNG)</p>
+                </div>
+                <img id="preview" alt="Preview">
+            </div>
+            <input type="file" id="file-input" accept="image/*">
+            <button class="btn-predict" id="predict-btn" disabled>RUN DIAGNOSTIC</button>
+        </section>
+
+        <section class="result-section">
+            <div class="result-placeholder" id="placeholder">
+                <div style="font-size: 3rem; opacity: 0.5; margin-bottom: 1rem;">📊</div>
+                <p>Waiting for analysis...</p>
+                <p style="font-size: 0.8rem; color: var(--text-dim);">The neural network will process the lesion characteristics.</p>
+            </div>
+
+            <div class="result-content" id="results">
+                <div class="prediction-main">
+                    <p style="text-transform: uppercase; letter-spacing: 0.2em; font-size: 0.7rem; color: var(--text-dim);">Primary Classification</p>
+                    <div class="class-label" id="main-class">Category</div>
+                    <span class="confidence-badge" id="main-confidence">0.0% Confidence</span>
+                </div>
+
+                <div class="chart-container" id="probability-list">
+                    <!-- Bars inserted here by JS -->
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const preview = document.getElementById('preview');
+        const predictBtn = document.getElementById('predict-btn');
+        const placeholder = document.getElementById('placeholder');
+        const results = document.getElementById('results');
+        const probList = document.getElementById('probability-list');
+
+        let currentFile = null;
+
+        // Interaction
+        dropZone.onclick = () => fileInput.click();
+        
+        fileInput.onchange = (e) => {
+            if(e.target.files.length > 0) handleFile(e.target.files[0]);
+        };
+
+        dropZone.ondragover = (e) => {
+            e.preventDefault();
+            dropZone.classList.add('active');
+        };
+
+        dropZone.ondragleave = () => dropZone.classList.remove('active');
+
+        dropZone.ondrop = (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('active');
+            if(e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]);
+        };
+
+        function handleFile(file) {
+            if(!file.type.startsWith('image/')) return;
+            currentFile = file;
+            
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                preview.src = e.target.result;
+                preview.style.display = 'block';
+                predictBtn.disabled = false;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        predictBtn.onclick = async () => {
+            if(!currentFile) return;
+
+            // Show loading state
+            predictBtn.disabled = true;
+            predictBtn.textContent = 'ANALYZING...';
+            placeholder.style.display = 'none';
+            results.style.display = 'none';
+
+            const formData = new FormData();
+            formData.append('image', currentFile);
+
+            try {
+                const response = await fetch('/predict', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                displayResults(data);
+            } catch (err) {
+                alert('Analysis failed: ' + err.message);
+            } finally {
+                predictBtn.disabled = false;
+                predictBtn.textContent = 'RUN DIAGNOSTIC';
+            }
+        };
+
+        function displayResults(data) {
+            results.style.display = 'block';
+            document.getElementById('main-class').textContent = data.class_name;
+            document.getElementById('main-confidence').textContent = (data.confidence * 100).toFixed(1) + '% Confidence';
+            
+            probList.innerHTML = '<p style="font-size: 0.8rem; margin-bottom: 1rem; color: var(--text-dim);">Detailed Probabilities:</p>';
+            
+            // Sort by probability
+            const sorted = Object.entries(data.all_probabilities)
+                .sort((a, b) => b[1] - a[1]);
+
+            sorted.forEach(([label, prob]) => {
+                const percentage = (prob * 100).toFixed(2);
+                probList.innerHTML += `
+                    <div class="prob-bar-wrapper">
+                        <div class="prob-label">
+                            <span>${label}</span>
+                            <span>${percentage}%</span>
+                        </div>
+                        <div class="prob-bar-bg">
+                            <div class="prob-bar-fill" style="width: ${percentage}%"></div>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+    </script>
+</body>
+</html>

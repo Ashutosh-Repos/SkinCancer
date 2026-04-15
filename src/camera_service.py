@@ -7,6 +7,7 @@ import os
 import argparse
 import cv2
 import numpy as np
+import time
 from datetime import datetime
 from typing import Optional
 
@@ -42,6 +43,10 @@ class CameraService:
         # Create screenshots directory
         self.screenshots_dir = 'screenshots'
         os.makedirs(self.screenshots_dir, exist_ok=True)
+        
+        # Feedback overlay state
+        self.feedback_msg = None
+        self.feedback_expiry = 0
         
         print("Camera Service initialized!")
     
@@ -154,6 +159,13 @@ class CameraService:
                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
             y_pos += 20
         
+        # Draw feedback message if active
+        if self.feedback_msg and time.time() < self.feedback_expiry:
+            cv2.putText(frame, self.feedback_msg, (width // 2 - 100, height // 2),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+            # Add a white border flash
+            cv2.rectangle(frame, (0, 0), (width-1, height-1), (255, 255, 255), 5)
+            
         return frame
     
     def save_screenshot(self, frame: np.ndarray, prediction: dict):
@@ -173,6 +185,10 @@ class CameraService:
         
         cv2.imwrite(filepath, frame)
         print(f"Screenshot saved: {filepath}")
+        
+        # Set feedback message
+        self.feedback_msg = "SCREENSHOT SAVED!"
+        self.feedback_expiry = time.time() + 1.5  # Show for 1.5 seconds
     
     def run(self):
         """
@@ -185,8 +201,9 @@ class CameraService:
         print("\n" + "="*60)
         print("CAMERA SERVICE RUNNING")
         print("="*60)
-        print("Press 'q' to quit")
-        print("Press 's' to save screenshot")
+        print("IMPORTANT: The Camera Window MUST be focused for keys to work!")
+        print(" - Press 'q' to quit")
+        print(" - Press 's' to save screenshot")
         print("="*60 + "\n")
         
         frame_count = 0
@@ -252,17 +269,26 @@ class APIService:
         Args:
             model_path: Path to trained model
         """
-        from flask import Flask, request, jsonify
+        from flask import Flask, request, jsonify, render_template
         from flask_cors import CORS
         
         self.predictor = SkinCancerPredictor(model_path)
-        self.app = Flask(__name__)
+        
+        # Initialize Flask with template folder relative to this file
+        template_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'templates'))
+        self.app = Flask(__name__, template_folder=template_dir)
         CORS(self.app)
         
         # Register routes
+        self.app.route('/', methods=['GET'])(self.render_ui)
         self.app.route('/health', methods=['GET'])(self.health_check)
         self.app.route('/predict', methods=['POST'])(self.predict_endpoint)
         self.app.route('/predict_base64', methods=['POST'])(self.predict_base64_endpoint)
+    
+    def render_ui(self):
+        """Serve the diagnostic Web UI."""
+        from flask import render_template
+        return render_template('index.html')
     
     def health_check(self):
         """Health check endpoint."""
@@ -312,9 +338,13 @@ class APIService:
             return jsonify({'error': 'No image data provided'}), 400
         
         try:
-            # Decode base64 image
-            image_data = base64.b64decode(data['image'])
-            image = Image.open(io.BytesIO(image_data))
+            # Decode base64 image (strip data-uri header if present)
+            b64_string = data['image']
+            if ',' in b64_string:
+                b64_string = b64_string.split(',')[1]
+                
+            image_data = base64.b64decode(b64_string)
+            image = Image.open(io.BytesIO(image_data)).convert('RGB')
             image_array = np.array(image)
             
             # Ensure RGB
@@ -376,7 +406,7 @@ def main():
     parser.add_argument(
         '--port',
         type=int,
-        default=5000,
+        default=5005,
         help='API port (for api mode)'
     )
     

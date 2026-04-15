@@ -182,17 +182,22 @@ class SkinCancerPredictor:
         if not os.path.exists(image_path):
             raise FileNotFoundError(f"Image file not found: {image_path}")
         
-        # Load image
-        image = Image.open(image_path)
-        image_array = np.array(image)
-        
-        # Ensure RGB format
-        if len(image_array.shape) == 2:  # Grayscale
-            image_array = np.stack([image_array] * 3, axis=-1)
-        elif image_array.shape[2] == 4:  # RGBA
-            image_array = image_array[:, :, :3]
-        
-        return self.predict(image_array)
+        try:
+            # Load image
+            image = Image.open(image_path).convert('RGB')
+            image_array = np.array(image)
+            
+            return self.predict(image_array)
+        except Exception as e:
+            print(f"Error predicting from file {image_path}: {e}")
+            # Return a "failed" result structure
+            return {
+                'class_code': 'unknown',
+                'class_name': f'Error: {str(e)}',
+                'class_index': -1,
+                'confidence': 0.0,
+                'error': str(e)
+            }
     
     def predict_batch(self, images: list) -> list:
         """

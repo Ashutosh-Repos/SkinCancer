@@ -126,6 +126,20 @@ Evaluation outputs:
 - Per-class metrics
 - Results saved in `results/`
 
+### One-Click Demo Launcher (Recommended)
+
+To simplify the demonstration, use the unified demo launcher:
+```bash
+python run_demo.py
+```
+This launcher provides an interactive menu to:
+1. 🚀 **Verify Inference** on a sample image.
+2. 📸 **Launch Real-Time Camera** service.
+3. 🌐 **Start API Server** for integration tests.
+4. ⚙️ **Run Diagnostics** to verify file integrity.
+
+---
+
 ### Running Inference
 
 Predict on a single image:

@@ -61,6 +61,7 @@ class DataLoader:
         
         # Map image paths
         image_paths = self._get_image_paths()
+        self.metadata_df = self.metadata_df.copy()  # Avoid SettingWithCopyWarning
         self.metadata_df['path'] = self.metadata_df['image_id'].map(image_paths.get)
         
         # Validate: check how many images were found
@@ -123,8 +124,14 @@ class DataLoader:
         images = []
         errors = 0
         for i, path in enumerate(self.metadata_df['path']):
+            if path is None:
+                errors += 1
+                images.append(np.zeros((*self.image_size, 3), dtype=np.uint8))
+                continue
+                
             try:
-                img = Image.open(path).resize(
+                img = Image.open(path).convert('RGB')
+                img = img.resize(
                     (self.image_size[1], self.image_size[0])  # (width, height)
                 )
                 images.append(np.array(img))
@@ -212,17 +219,39 @@ class DataLoader:
         
         # Apply normalization based on mode
         if normalize is True:
-            # Custom mean/std normalization (for from-scratch models)
-            train_mean = X_train.mean()
-            train_std = X_train.std()
+            # Try to load existing stats first (for scientific consistency during eval)
+            stats_loaded = False
+            stats_path = os.path.join(
+                os.path.dirname(self.metadata_path), 'norm_stats.json'
+            )
             
-            # Safety: if std is ~0, images are all black/placeholders
-            if train_std < 1.0:
-                raise ValueError(
-                    f"Training data has near-zero variance (mean={train_mean:.2f}, "
-                    f"std={train_std:.2f}). This means most images are blank. "
-                    f"Check that images exist in data/images/."
-                )
+            if os.path.exists(stats_path):
+                try:
+                    with open(stats_path) as f:
+                        stats = json.load(f)
+                    train_mean = stats['mean']
+                    train_std = stats['std']
+                    stats_loaded = True
+                    print(f"  Using saved normalization stats from {stats_path}")
+                except Exception:
+                    print("  Warning: norm_stats.json corrupted, falling back to recalculation")
+            
+            if not stats_loaded:
+                # Custom mean/std normalization (for from-scratch models)
+                train_mean = X_train.mean()
+                train_std = X_train.std()
+                
+                # Safety: if std is ~0, images are all black/placeholders
+                if train_std < 1.0:
+                    raise ValueError(
+                        f"Training data has near-zero variance (mean={train_mean:.2f}, "
+                        f"std={train_std:.2f}). This means most images are blank. "
+                        f"Check that images exist in data/images/."
+                    )
+                
+                # Save normalization stats for inference
+                self._save_norm_stats(train_mean, train_std)
+                print(f"  Calculated and saved new metrics: mean={train_mean:.2f}, std={train_std:.2f}")
             
             X_train = (X_train - train_mean) / train_std
             X_val = (X_val - train_mean) / train_std
@@ -230,10 +259,6 @@ class DataLoader:
             
             self.train_mean = train_mean
             self.train_std = train_std
-            
-            # Save normalization stats for inference
-            self._save_norm_stats(train_mean, train_std)
-            print(f"  Normalized with mean={train_mean:.2f}, std={train_std:.2f}")
             
         elif normalize == 'rescale':
             # Scale to [0, 1] range (for ViT)

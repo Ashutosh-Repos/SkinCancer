@@ -41,6 +41,16 @@ class GradCAM:
         self.last_conv_layer = self._find_last_conv_layer()
         print(f"  Last conv layer: {self.last_conv_layer}")
         print(f"  Image size: {self.image_size}")
+        
+        # Force the model to build/trace if it's a Sequential model
+        # This fixes "layer has never been called" error
+        try:
+            dummy_input = tf.zeros((1, *self.image_size, 3))
+            _ = self.model(dummy_input)
+            print("  Model warmed up successfully")
+        except Exception as e:
+            print(f"  Note: Model warmup skipped ({e})")
+            
         print("Model loaded for Grad-CAM!")
     
     def _load_settings(self, model_path: str):
@@ -75,26 +85,49 @@ class GradCAM:
                 self.train_std = stats['std']
     
     def _find_last_conv_layer(self) -> str:
-        """Find the name of the last convolutional layer in the model."""
+        """Find the name of the last convolutional layer with spatial dimensions."""
         last_conv_name = None
         
-        # For nested models (transfer learning), we need to find Conv2D layers
-        # that produce output tensors connected to the outer model's graph.
-        # We iterate through all layers of the outer model first.
-        for layer in self.model.layers:
+        # Iterate backwards to find the last Conv2D that has spatial extent > 1
+        for layer in reversed(self.model.layers):
             if isinstance(layer, tf.keras.layers.Conv2D):
-                last_conv_name = layer.name
+                # Try to get shape from output or input
+                try:
+                    shape = layer.output.shape
+                    h, w = shape[1], shape[2]
+                except Exception:
+                    # Fallback for models where output isn't connected
+                    h, w = 0, 0
+                
+                if h is not None and w is not None and h > 1 and w > 1:
+                    last_conv_name = layer.name
+                    break
         
-        # If no Conv2D found at top level, search inside nested models
+        # If not found at top level, search inside nested models
         if last_conv_name is None:
-            for layer in self.model.layers:
+            for layer in reversed(self.model.layers):
                 if hasattr(layer, 'layers'):
-                    # This is a nested model (e.g., EfficientNet backbone)
-                    for sublayer in layer.layers:
+                    for sublayer in reversed(layer.layers):
                         if isinstance(sublayer, tf.keras.layers.Conv2D):
-                            last_conv_name = sublayer.name
-                            self._backbone_name = layer.name
+                            try:
+                                shape = sublayer.output.shape
+                                h, w = shape[1], shape[2]
+                            except Exception:
+                                h, w = 0, 0
+                                
+                            if h is not None and w is not None and h > 1 and w > 1:
+                                last_conv_name = sublayer.name
+                                self._backbone_name = layer.name
+                                break
+                    if last_conv_name: break
         
+        # Fallback to absolute last if none with spatial found
+        if last_conv_name is None:
+            for layer in reversed(self.model.layers):
+                if isinstance(layer, tf.keras.layers.Conv2D):
+                    last_conv_name = layer.name
+                    break
+                    
         if last_conv_name is None:
             raise ValueError("No Conv2D layer found in model")
         
@@ -128,80 +161,85 @@ class GradCAM:
     def compute_heatmap(self, img_tensor: np.ndarray, pred_index: int = None) -> np.ndarray:
         """
         Compute Grad-CAM heatmap.
-        
-        Args:
-            img_tensor: Preprocessed image tensor (1, H, W, 3)
-            pred_index: Class index to generate CAM for (None = predicted class)
-        
-        Returns:
-            Heatmap as numpy array (H, W) normalized to [0, 1]
         """
-        # Find the target conv layer output within the connected graph
+        # 1. Try to find the target layer
         target_layer = None
-        
-        # First try to find the layer at the top level
         for layer in self.model.layers:
             if layer.name == self.last_conv_layer:
                 target_layer = layer
                 break
         
-        # If not found at top level, find inside backbone
-        if target_layer is None and self._backbone_name is not None:
-            backbone = self.model.get_layer(self._backbone_name)
-            # Build a model that extracts the backbone's intermediate output
-            # by creating a new model from backbone's input to the target layer
-            try:
-                backbone_conv_output = backbone.get_layer(self.last_conv_layer).output
-                # Create a new backbone model that outputs the conv layer
-                intermediate_backbone = tf.keras.Model(
-                    inputs=backbone.input,
-                    outputs=backbone_conv_output
-                )
-                # Now build the grad model using the outer model's input
-                conv_output = intermediate_backbone(self.model.input)
-                grad_model = tf.keras.Model(
-                    inputs=self.model.input,
-                    outputs=[conv_output, self.model.output]
-                )
-            except Exception:
-                # Fallback: use the backbone's full output (before GAP)
-                grad_model = tf.keras.Model(
-                    inputs=self.model.input,
-                    outputs=[backbone.output, self.model.output]
-                )
-        else:
-            # Simple model (Sequential/ResNet) — straightforward
+        # 2. Build the grad_model
+        grad_model = None
+        try:
+            # Try functional/direct way first
             grad_model = tf.keras.Model(
                 inputs=self.model.input,
                 outputs=[target_layer.output, self.model.output]
             )
-        
-        # Compute gradients
-        with tf.GradientTape() as tape:
-            conv_outputs, predictions = grad_model(img_tensor)
-            if pred_index is None:
-                pred_index = tf.argmax(predictions[0])
-            class_output = predictions[:, pred_index]
-        
-        # Get gradients of the predicted class w.r.t. conv outputs
-        grads = tape.gradient(class_output, conv_outputs)
-        
-        if grads is None:
-            print("Warning: Gradients are None. Using fallback heatmap.")
+        except Exception:
+            # Fallback for Sequential models: Reconstruct Functional graph
+            try:
+                img_input = tf.keras.Input(shape=(*self.image_size, 3))
+                x = img_input
+                target_out = None
+                for layer in self.model.layers:
+                    x = layer(x)
+                    if layer.name == self.last_conv_layer:
+                        target_out = x
+                
+                if target_out is not None:
+                    grad_model = tf.keras.Model(inputs=img_input, outputs=[target_out, x])
+            except Exception as e:
+                print(f"  Warning: Reconstruction fallback failed: {e}")
+
+        if grad_model is None:
+            print("  Warning: Could not define gradient graph. Returning empty heatmap.")
             return np.zeros(self.image_size, dtype=np.float32)
-        
-        # Global average pooling of gradients
-        pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
-        
-        # Weight the conv outputs by the pooled gradients
-        conv_outputs = conv_outputs[0]
-        heatmap = conv_outputs @ pooled_grads[..., tf.newaxis]
-        heatmap = tf.squeeze(heatmap)
-        
-        # Apply ReLU and normalize
-        heatmap = tf.maximum(heatmap, 0) / (tf.math.reduce_max(heatmap) + 1e-8)
-        
-        return heatmap.numpy()
+
+        # 3. Compute gradients with Tape
+        try:
+            with tf.GradientTape() as tape:
+                conv_outputs, predictions = grad_model(img_tensor)
+                
+                # Unwrap list if necessary
+                if isinstance(predictions, list):
+                    predictions = predictions[0]
+                
+                # Ensure predictions is 2D (batch_size, num_classes)
+                if hasattr(predictions, 'shape'):
+                    if len(predictions.shape) == 1:
+                        predictions = tf.expand_dims(predictions, axis=0)
+                else:
+                    predictions = tf.convert_to_tensor(predictions)
+                
+                if pred_index is None:
+                    pred_index = tf.argmax(predictions[0])
+                
+                # Extract probability for target class
+                class_output = predictions[:, pred_index]
+
+            # Get gradients
+            grads = tape.gradient(class_output, conv_outputs)
+            
+            if grads is None:
+                print("  Warning: Gradients are None.")
+                return np.zeros(self.image_size, dtype=np.float32)
+
+            # Pooling and heatmap generation
+            pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
+            
+            # Use simple channel-wise multiplication for stability
+            heatmap = tf.reduce_sum(tf.multiply(pooled_grads, conv_outputs[0]), axis=-1)
+            
+            heatmap = tf.maximum(heatmap, 0) / (tf.math.reduce_max(heatmap) + 1e-8)
+            return heatmap.numpy()
+            
+        except Exception as e:
+            import traceback
+            print(f"  Warning: Grad-CAM tape failed: {e}")
+            traceback.print_exc()
+            return np.zeros(self.image_size, dtype=np.float32)
     
     def overlay_heatmap(
         self, 
